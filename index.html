@@ -90,8 +90,8 @@
     </div>
   </header>
   <section class="channel curve" id="curve" hidden>
-    <h2>Vues selon le nombre de vidéos publiées</h2>
-    <p class="sub">Une courbe par chaîne, un point par jour de relevé sur la période choisie.</p>
+    <h2>Vues cumulées selon le nombre de vidéos publiées</h2>
+    <p class="sub">Une courbe par chaîne, de la première vidéo publiée à la dernière. Survole un point pour voir la vidéo.</p>
     <ul class="legend" id="curve-legend"></ul>
     <div class="plot" id="curve-plot"></div>
     <details>
@@ -153,53 +153,58 @@ function niceDomain(min, max, count, integer) {
   return { lo, hi, ticks };
 }
 
-function renderCurve(entries) {
+let videoData = { channels: {} };
+
+function renderCurve() {
   const box = document.getElementById("curve");
-  box.hidden = false;
-  const inRange = (h) => {
-    const since = new Date(day(h[h.length - 1].date) - range * 864e5);
-    return h.filter((r) => day(r.date) >= since);
-  };
-  const series = entries.map(([id, ch], i) => ({
-    id, title: ch.title, color: `var(--s${(i % 7) + 1})`,
-    pts: inRange(ch.history).filter((r) => r.videos != null && r.views != null)
-      .map((r) => ({ x: r.videos, y: r.views, date: r.date }))
-      .sort((a, b) => a.x - b.x || a.date.localeCompare(b.date)),
-  })).filter((s) => s.pts.length);
+  const entries = Object.entries(videoData.channels).filter(([, ch]) => ch.videos && ch.videos.length);
+  box.hidden = !entries.length;
+  if (!entries.length) return;
+  // Une couleur fixe par chaîne, dans l'ordre de l'historique
+  const order = Object.keys(history.channels);
+  const series = entries.map(([id, ch]) => {
+    const idx = order.includes(id) ? order.indexOf(id) : order.length + entries.findIndex(([i]) => i === id);
+    let total = 0;
+    return {
+      id, title: ch.title, color: `var(--s${(idx % 7) + 1})`,
+      pts: ch.videos.map((v, k) => ({ x: k + 1, y: (total += v.views), v })),
+    };
+  });
 
   // Légende (cliquable pour masquer / afficher une chaîne)
   const legend = document.getElementById("curve-legend");
   legend.innerHTML = series.map((s) => `<li><button data-id="${esc(s.id)}" aria-pressed="${!hiddenSeries.has(s.id)}"><span class="sw" style="background:${s.color}"></span>${esc(s.title)}</button></li>`).join("");
   legend.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
     hiddenSeries.has(b.dataset.id) ? hiddenSeries.delete(b.dataset.id) : hiddenSeries.add(b.dataset.id);
-    renderCurve(entries);
+    renderCurve();
   }));
 
-  // Tableau (dernier relevé de chaque chaîne)
+  // Tableau récapitulatif
   document.getElementById("curve-table").innerHTML = "<thead><tr><th>Chaîne</th><th>Vidéos</th><th>Vues</th><th>Vues / vidéo</th></tr></thead><tbody>" +
-    series.map((s) => { const l = s.pts.reduce((a, b) => (b.date > a.date ? b : a)); return `<tr><td>${esc(s.title)}</td><td>${nf.format(l.x)}</td><td>${nf.format(l.y)}</td><td>${l.x ? nf.format(Math.round(l.y / l.x)) : "—"}</td></tr>`; }).join("") + "</tbody>";
+    series.map((s) => { const l = s.pts[s.pts.length - 1]; return `<tr><td>${esc(s.title)}</td><td>${nf.format(l.x)}</td><td>${nf.format(l.y)}</td><td>${nf.format(Math.round(l.y / l.x))}</td></tr>`; }).join("") + "</tbody>";
 
   const plot = document.getElementById("curve-plot");
   const shown = series.filter((s) => !hiddenSeries.has(s.id));
   if (!shown.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une chaîne dans la légende.</p>'; return; }
 
-  const all = shown.flatMap((s) => s.pts);
-  const X = niceDomain(Math.min(...all.map((p) => p.x)), Math.max(...all.map((p) => p.x)), 6, true);
-  const Y = niceDomain(Math.min(...all.map((p) => p.y)), Math.max(...all.map((p) => p.y)), 5, true);
+  const X = niceDomain(0, Math.max(...shown.map((s) => s.pts.length)), 6, true);
+  const Y = niceDomain(0, Math.max(...shown.map((s) => s.pts[s.pts.length - 1].y)), 5, true);
   const W = Math.max(300, plot.clientWidth), H = Math.round(Math.min(380, Math.max(240, W * 0.5)));
   const m = { t: 10, r: 12, b: 42, l: 72 };
   const sx = (v) => m.l + ((v - X.lo) / (X.hi - X.lo)) * (W - m.l - m.r);
   const sy = (v) => H - m.b - ((v - Y.lo) / (Y.hi - Y.lo)) * (H - m.t - m.b);
   const xTicks = X.ticks.filter((_, i) => W > 500 || i % 2 === 0);
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Nombre de vues en fonction du nombre de vidéos publiées, par chaîne">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Vues cumulées en fonction du nombre de vidéos publiées, par chaîne">`;
   svg += Y.ticks.map((t) => `<line x1="${m.l}" x2="${W - m.r}" y1="${sy(t)}" y2="${sy(t)}" stroke="var(--grid)" stroke-width="1"/><text class="tick" x="${m.l - 8}" y="${sy(t)}" text-anchor="end" dominant-baseline="middle">${compact.format(t)}</text>`).join("");
   svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--line)"/>`;
   svg += xTicks.map((t) => `<text class="tick" x="${sx(t)}" y="${H - m.b + 18}" text-anchor="middle">${nf.format(t)}</text>`).join("");
   svg += `<text class="axis-title" x="${(m.l + W - m.r) / 2}" y="${H - 4}" text-anchor="middle">Vidéos publiées</text>`;
-  svg += `<text class="axis-title" x="${-(m.t + H - m.b) / 2}" y="12" transform="rotate(-90)" text-anchor="middle">Vues totales</text>`;
+  svg += `<text class="axis-title" x="${-(m.t + H - m.b) / 2}" y="12" transform="rotate(-90)" text-anchor="middle">Vues cumulées</text>`;
   for (const s of shown) {
-    if (s.pts.length > 1) svg += `<path d="${s.pts.map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join(" ")}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // la courbe part de 0 vue / 0 vidéo
+    const d = [{ x: 0, y: 0 }, ...s.pts].map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join(" ");
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     const last = s.pts[s.pts.length - 1];
     svg += `<circle cx="${sx(last.x)}" cy="${sy(last.y)}" r="4" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`;
   }
@@ -216,8 +221,9 @@ function renderCurve(entries) {
     for (const t of targets) { const d = Math.hypot(t.cx - mx, t.cy - my); if (d < bd) { bd = d; best = t; } }
     if (!best) return hide();
     hl.setAttribute("cx", best.cx); hl.setAttribute("cy", best.cy); hl.setAttribute("visibility", "visible");
-    tip.innerHTML = `<b>${esc(best.s.title)}</b><br>${nf.format(best.p.y)} vues · ${nf.format(best.p.x)} vidéos<br><span class="m">${day(best.p.date).toLocaleDateString("fr-FR", { dateStyle: "medium" })}</span>`;
-    tip.style.left = Math.min(Math.max(best.cx / k, 80), r.width - 80) + "px";
+    const v = best.p.v, title = v.title.length > 48 ? v.title.slice(0, 47) + "…" : v.title;
+    tip.innerHTML = `<b>${esc(best.s.title)}</b> · vidéo n°${nf.format(best.p.x)}<br>${esc(title)}<br>${nf.format(v.views)} vues · <span class="m">cumul ${nf.format(best.p.y)}</span><br><span class="m">publiée le ${new Date(v.published).toLocaleDateString("fr-FR", { dateStyle: "medium" })}</span>`;
+    tip.style.left = Math.min(Math.max(best.cx / k, 130), r.width - 130) + "px";
     tip.style.top = best.cy / k + "px";
     tip.hidden = false;
   });
@@ -227,12 +233,12 @@ function renderCurve(entries) {
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { const e = Object.entries(history.channels); if (e.length) renderCurve(e); }, 150);
+  resizeTimer = setTimeout(renderCurve, 150);
 });
 
 function render() {
   const entries = Object.entries(history.channels);
-  if (entries.length) renderCurve(entries);
+  renderCurve();
   if (!entries.length) {
     root.innerHTML = '<div class="empty"><strong>Aucune donnée pour l’instant</strong><p>Lance le workflow « Mise à jour des stats YouTube » dans l’onglet Actions de GitHub : les chiffres apparaîtront ici ensuite, puis chaque matin à 9h.</p></div>';
     document.getElementById("updated").textContent = "En attente de la première mise à jour";
@@ -261,7 +267,13 @@ document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("clic
 
 fetch("data/history.json", { cache: "no-store" })
   .then((r) => r.json())
-  .then((j) => { history = j; render(); })
+  .then((j) => {
+    history = j; render();
+    fetch("data/videos.json", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { channels: {} }))
+      .then((v) => { videoData = v; renderCurve(); })
+      .catch(() => {});
+  })
   .catch(() => {
     document.getElementById("updated").textContent = "Impossible de charger les données.";
     root.innerHTML = '<div class="empty"><strong>Données introuvables</strong><p>Ouvre la page depuis son adresse GitHub Pages (pas en double-cliquant sur le fichier), et vérifie que <code>data/history.json</code> existe.</p></div>';
