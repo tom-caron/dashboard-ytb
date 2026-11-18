@@ -20,5 +20,6 @@ L'adresse du tableau de bord s'affiche à la fin du workflow (et dans Settings �
   GitHub peut décaler l'exécution de quelques minutes.
 - L'historique commence le jour du premier lancement : les courbes se remplissent jour après jour.
 - Le graphique « Vues de chaque vidéo » utilise `data/videos.json`, réécrit à chaque lancement avec toutes les vidéos publiques de chaque chaîne (titre, date, vues). Il est donc complet dès le premier lancement.
+- Les « Vues totales » sont la somme des vues de chaque vidéo : le compteur de la chaîne renvoyé par YouTube a souvent plusieurs jours de retard.
 - L'API publique ne donne pas le temps de visionnage, les impressions ni le CTR : il faudrait l'API YouTube Analytics (OAuth) pour ça.
 - Le dépôt étant public, l'historique l'est aussi (ce sont des chiffres déjà publics sur YouTube).

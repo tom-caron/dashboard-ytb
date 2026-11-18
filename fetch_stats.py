@@ -69,23 +69,29 @@ def main() -> None:
             print(f"[erreur] {ref} : {exc}")
             continue
         stats = item["statistics"]
+        title = item["snippet"]["title"]
+        vids = None
+        try:
+            uploads = item["contentDetails"]["relatedPlaylists"]["uploads"]
+            vids = fetch_videos(uploads, key)
+            videos["channels"][item["id"]] = {"title": title, "videos": vids}
+            print(f"     {len(vids)} vidéos récupérées")
+        except Exception as exc:
+            print(f"[erreur vidéos] {ref} : {exc}")
+        # Le compteur de vues de la chaîne est mis à jour par YouTube avec plusieurs jours
+        # de retard : on préfère la somme des vues des vidéos, quasi en temps réel.
+        channel_views = int(stats["viewCount"])
         entry = {
             "date": today,
             "subs": None if stats.get("hiddenSubscriberCount") else int(stats["subscriberCount"]),
-            "views": int(stats["viewCount"]),
-            "videos": int(stats["videoCount"]),
+            "views": max(channel_views, sum(v["views"] for v in vids)) if vids else channel_views,
+            "videos": len(vids) if vids else int(stats["videoCount"]),
         }
         channel = history["channels"].setdefault(item["id"], {"history": []})
-        channel["title"] = item["snippet"]["title"]
+        channel["title"] = title
         channel["thumb"] = item["snippet"]["thumbnails"]["default"]["url"]
         channel["history"] = [h for h in channel["history"] if h["date"] != today] + [entry]
-        print(f"[ok] {channel['title']} : {entry}")
-        try:
-            uploads = item["contentDetails"]["relatedPlaylists"]["uploads"]
-            videos["channels"][item["id"]] = {"title": channel["title"], "videos": fetch_videos(uploads, key)}
-            print(f"     {len(videos['channels'][item['id']]['videos'])} vidéos récupérées")
-        except Exception as exc:
-            print(f"[erreur vidéos] {ref} : {exc}")
+        print(f"[ok] {title} : {entry} (compteur chaîne : {channel_views} vues)")
 
     HISTORY.write_text(json.dumps(history, ensure_ascii=False, indent=1), encoding="utf-8")
     VIDEOS.write_text(json.dumps(videos, ensure_ascii=False, indent=1), encoding="utf-8")
