@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mes chaînes YouTube</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eef1f5;
+    --panel: #ffffff;
+    --ink: #14213d;
+    --muted: #5b6678;
+    --line: #d9dfe8;
+    --accent: #3a35d6;
+    --up: #137a4b;
+    --down: #b3261e;
+    --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+    --body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1424; --panel: #171e35; --ink: #e8ecf8; --muted: #9aa5bf; --line: #2a3354; --accent: #8c89ff; --up: #4cc38a; --down: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--body); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: end; margin-bottom: 28px; }
+  h1 { margin: 0; font: 700 clamp(1.8rem, 4vw, 2.6rem)/1.1 var(--display); letter-spacing: -0.02em; }
+  #updated { margin: 6px 0 0; color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--panel); }
+  .seg button { font: 500 0.9rem var(--body); color: var(--muted); background: none; border: 0; padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .seg button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .channel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; margin-bottom: 20px; }
+  .who { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .who img { width: 48px; height: 48px; border-radius: 50%; background: var(--line); }
+  .who a { font: 700 1.25rem var(--display); color: inherit; text-decoration: none; }
+  .who a:hover { text-decoration: underline; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+  .label { color: var(--muted); font-size: 0.9rem; }
+  .value { font: 700 clamp(2rem, 5vw, 2.8rem)/1.1 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .delta { font-size: 0.9rem; color: var(--muted); min-height: 1.4em; }
+  .delta .pos { color: var(--up); font-weight: 500; }
+  .delta .neg { color: var(--down); font-weight: 500; }
+  svg { display: block; width: 100%; height: 64px; color: var(--accent); margin-top: 8px; }
+  .hint { color: var(--muted); font-size: 0.85rem; margin: 8px 0 0; }
+  .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 14px; padding: 28px; }
+  .empty strong { font-family: var(--display); font-size: 1.2rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Mes chaînes YouTube</h1>
+      <p id="updated">Chargement…</p>
+    </div>
+    <div class="seg" role="group" aria-label="Période affichée">
+      <button data-range="7" aria-pressed="false">7 jours</button>
+      <button data-range="30" aria-pressed="true">30 jours</button>
+      <button data-range="90" aria-pressed="false">90 jours</button>
+    </div>
+  </header>
+  <main id="channels" aria-live="polite"></main>
+</div>
+
+<script>
+const nf = new Intl.NumberFormat("fr-FR");
+const root = document.getElementById("channels");
+let history = { channels: {} };
+let range = 30;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const day = (iso) => new Date(iso + "T12:00:00");
+
+function sparkline(values) {
+  if (values.length < 2) return '<p class="hint">La courbe apparaît dès le deuxième jour de données.</p>';
+  const w = 300, h = 64, min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
+  const d = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - 4 - ((v - min) / span) * (h - 8);
+    return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+  }).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Évolution sur la période"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function stat(label, rows, key) {
+  const pts = rows.filter((r) => r[key] != null);
+  if (!pts.length) return `<div><div class="label">${label}</div><div class="value">Masqué</div></div>`;
+  const last = pts[pts.length - 1], first = pts[0];
+  let delta = '<span>Pas encore de comparaison</span>';
+  if (pts.length > 1) {
+    const diff = last[key] - first[key];
+    const days = Math.round((day(last.date) - day(first.date)) / 864e5);
+    const cls = diff > 0 ? "pos" : diff < 0 ? "neg" : "";
+    const txt = diff === 0 ? "Stable" : (diff > 0 ? "+" : "−") + nf.format(Math.abs(diff));
+    delta = `<span class="${cls}">${txt}</span> sur ${days} j`;
+  }
+  return `<div><div class="label">${label}</div><div class="value">${nf.format(last[key])}</div><div class="delta">${delta}</div>${sparkline(pts.map((r) => r[key]))}</div>`;
+}
+
+function render() {
+  const entries = Object.entries(history.channels);
+  if (!entries.length) {
+    root.innerHTML = '<div class="empty"><strong>Aucune donnée pour l’instant</strong><p>Lance le workflow « Mise à jour des stats YouTube » dans l’onglet Actions de GitHub : les chiffres apparaîtront ici ensuite, puis chaque matin à 9h.</p></div>';
+    document.getElementById("updated").textContent = "En attente de la première mise à jour";
+    return;
+  }
+  let latest = "";
+  root.innerHTML = entries.map(([id, ch]) => {
+    const all = ch.history;
+    const lastDate = all[all.length - 1].date;
+    if (lastDate > latest) latest = lastDate;
+    const since = new Date(day(lastDate) - range * 864e5);
+    const rows = all.filter((r) => day(r.date) >= since);
+    return `<section class="channel">
+      <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a></div>
+      <div class="stats">${stat("Abonnés", rows, "subs")}${stat("Vues totales", rows, "views")}${stat("Vidéos publiées", rows, "videos")}</div>
+    </section>`;
+  }).join("");
+  document.getElementById("updated").textContent = "Dernière mise à jour : " + day(latest).toLocaleDateString("fr-FR", { dateStyle: "full" });
+}
+
+document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+  range = +b.dataset.range;
+  document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  render();
+}));
+
+fetch("data/history.json", { cache: "no-store" })
+  .then((r) => r.json())
+  .then((j) => { history = j; render(); })
+  .catch(() => {
+    document.getElementById("updated").textContent = "Impossible de charger les données.";
+    root.innerHTML = '<div class="empty"><strong>Données introuvables</strong><p>Ouvre la page depuis son adresse GitHub Pages (pas en double-cliquant sur le fichier), et vérifie que <code>data/history.json</code> existe.</p></div>';
+  });
+</script>
+</body>
+</html>
