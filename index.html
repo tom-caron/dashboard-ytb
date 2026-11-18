@@ -48,6 +48,32 @@
   .hint { color: var(--muted); font-size: 0.85rem; margin: 8px 0 0; }
   .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 14px; padding: 28px; }
   .empty strong { font-family: var(--display); font-size: 1.2rem; }
+
+  /* Graphique vues / vidéos */
+  :root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --grid: #e6eaf0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --grid: #232b48; }
+  }
+  .curve h2 { margin: 0; font: 700 1.25rem var(--display); }
+  .curve .sub { margin: 2px 0 14px; color: var(--muted); font-size: 0.9rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; padding: 0; list-style: none; }
+  .legend button { display: inline-flex; align-items: center; gap: 7px; font: 400 0.88rem var(--body); color: var(--ink); background: none; border: 0; padding: 4px 2px; cursor: pointer; }
+  .legend button[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
+  .legend button[aria-pressed="false"] .sw { opacity: 0.3; }
+  .legend .sw { width: 14px; height: 3px; border-radius: 2px; }
+  .plot { position: relative; }
+  .plot svg { height: auto; color: inherit; margin: 0; overflow: visible; }
+  .plot .tick { fill: var(--muted); font: 400 12px var(--body); font-variant-numeric: tabular-nums; }
+  .plot .axis-title { fill: var(--muted); font: 500 12px var(--body); }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 0.85rem; line-height: 1.4; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); white-space: nowrap; transform: translate(-50%, calc(-100% - 12px)); }
+  .tip b { font-weight: 500; }
+  .tip .m { color: var(--muted); }
+  .curve details { margin-top: 12px; font-size: 0.9rem; }
+  .curve summary { cursor: pointer; color: var(--muted); }
+  .curve table { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .curve th, .curve td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .curve th:first-child, .curve td:first-child { text-align: left; }
+  .curve th { color: var(--muted); font-weight: 500; }
 </style>
 </head>
 <body>
@@ -63,6 +89,16 @@
       <button data-range="90" aria-pressed="false">90 jours</button>
     </div>
   </header>
+  <section class="channel curve" id="curve" hidden>
+    <h2>Vues selon le nombre de vidéos publiées</h2>
+    <p class="sub">Une courbe par chaîne, un point par jour de relevé (tout l’historique).</p>
+    <ul class="legend" id="curve-legend"></ul>
+    <div class="plot" id="curve-plot"></div>
+    <details>
+      <summary>Voir les chiffres</summary>
+      <table id="curve-table"></table>
+    </details>
+  </section>
   <main id="channels" aria-live="polite"></main>
 </div>
 
@@ -101,8 +137,98 @@ function stat(label, rows, key) {
   return `<div><div class="label">${label}</div><div class="value">${nf.format(last[key])}</div><div class="delta">${delta}</div>${sparkline(pts.map((r) => r[key]))}</div>`;
 }
 
+// ---------- Graphique vues / vidéos ----------
+const compact = new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 });
+const hiddenSeries = new Set();
+
+function niceDomain(min, max, count, integer) {
+  if (min === max) { const pad = Math.max(Math.abs(min) * 0.1, 1); min -= pad; max += pad; }
+  min = Math.max(0, min);
+  const raw = (max - min) / count, p = 10 ** Math.floor(Math.log10(raw));
+  let step = [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s >= raw);
+  if (integer) step = Math.max(1, Math.ceil(step));
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(+v.toFixed(6));
+  return { lo, hi, ticks };
+}
+
+function renderCurve(entries) {
+  const box = document.getElementById("curve");
+  box.hidden = false;
+  const series = entries.map(([id, ch], i) => ({
+    id, title: ch.title, color: `var(--s${(i % 7) + 1})`,
+    pts: ch.history.filter((r) => r.videos != null && r.views != null)
+      .map((r) => ({ x: r.videos, y: r.views, date: r.date }))
+      .sort((a, b) => a.x - b.x || a.date.localeCompare(b.date)),
+  })).filter((s) => s.pts.length);
+
+  // Légende (cliquable pour masquer / afficher une chaîne)
+  const legend = document.getElementById("curve-legend");
+  legend.innerHTML = series.map((s) => `<li><button data-id="${esc(s.id)}" aria-pressed="${!hiddenSeries.has(s.id)}"><span class="sw" style="background:${s.color}"></span>${esc(s.title)}</button></li>`).join("");
+  legend.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    hiddenSeries.has(b.dataset.id) ? hiddenSeries.delete(b.dataset.id) : hiddenSeries.add(b.dataset.id);
+    renderCurve(entries);
+  }));
+
+  // Tableau (dernier relevé de chaque chaîne)
+  document.getElementById("curve-table").innerHTML = "<thead><tr><th>Chaîne</th><th>Vidéos</th><th>Vues</th><th>Vues / vidéo</th></tr></thead><tbody>" +
+    series.map((s) => { const l = s.pts.reduce((a, b) => (b.date > a.date ? b : a)); return `<tr><td>${esc(s.title)}</td><td>${nf.format(l.x)}</td><td>${nf.format(l.y)}</td><td>${l.x ? nf.format(Math.round(l.y / l.x)) : "—"}</td></tr>`; }).join("") + "</tbody>";
+
+  const plot = document.getElementById("curve-plot");
+  const shown = series.filter((s) => !hiddenSeries.has(s.id));
+  if (!shown.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une chaîne dans la légende.</p>'; return; }
+
+  const all = shown.flatMap((s) => s.pts);
+  const X = niceDomain(Math.min(...all.map((p) => p.x)), Math.max(...all.map((p) => p.x)), 6, true);
+  const Y = niceDomain(Math.min(...all.map((p) => p.y)), Math.max(...all.map((p) => p.y)), 5, true);
+  const W = Math.max(300, plot.clientWidth), H = Math.round(Math.min(380, Math.max(240, W * 0.5)));
+  const m = { t: 10, r: 12, b: 42, l: 72 };
+  const sx = (v) => m.l + ((v - X.lo) / (X.hi - X.lo)) * (W - m.l - m.r);
+  const sy = (v) => H - m.b - ((v - Y.lo) / (Y.hi - Y.lo)) * (H - m.t - m.b);
+  const xTicks = X.ticks.filter((_, i) => W > 500 || i % 2 === 0);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Nombre de vues en fonction du nombre de vidéos publiées, par chaîne">`;
+  svg += Y.ticks.map((t) => `<line x1="${m.l}" x2="${W - m.r}" y1="${sy(t)}" y2="${sy(t)}" stroke="var(--grid)" stroke-width="1"/><text class="tick" x="${m.l - 8}" y="${sy(t)}" text-anchor="end" dominant-baseline="middle">${compact.format(t)}</text>`).join("");
+  svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--line)"/>`;
+  svg += xTicks.map((t) => `<text class="tick" x="${sx(t)}" y="${H - m.b + 18}" text-anchor="middle">${nf.format(t)}</text>`).join("");
+  svg += `<text class="axis-title" x="${(m.l + W - m.r) / 2}" y="${H - 4}" text-anchor="middle">Vidéos publiées</text>`;
+  svg += `<text class="axis-title" x="${-(m.t + H - m.b) / 2}" y="12" transform="rotate(-90)" text-anchor="middle">Vues totales</text>`;
+  for (const s of shown) {
+    if (s.pts.length > 1) svg += `<path d="${s.pts.map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join(" ")}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = s.pts[s.pts.length - 1];
+    svg += `<circle cx="${sx(last.x)}" cy="${sy(last.y)}" r="4" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`;
+  }
+  svg += `<circle id="curve-hl" r="5" fill="none" stroke="var(--ink)" stroke-width="2" visibility="hidden"/></svg>`;
+  plot.innerHTML = svg + '<div class="tip" id="curve-tip" hidden></div>';
+
+  const el = plot.querySelector("svg"), tip = plot.querySelector("#curve-tip"), hl = plot.querySelector("#curve-hl");
+  const targets = shown.flatMap((s) => s.pts.map((p) => ({ s, p, cx: sx(p.x), cy: sy(p.y) })));
+  const hide = () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); };
+  el.addEventListener("pointermove", (e) => {
+    const r = el.getBoundingClientRect(), k = W / r.width;
+    const mx = (e.clientX - r.left) * k, my = (e.clientY - r.top) * k;
+    let best = null, bd = 28 * k;
+    for (const t of targets) { const d = Math.hypot(t.cx - mx, t.cy - my); if (d < bd) { bd = d; best = t; } }
+    if (!best) return hide();
+    hl.setAttribute("cx", best.cx); hl.setAttribute("cy", best.cy); hl.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${esc(best.s.title)}</b><br>${nf.format(best.p.y)} vues · ${nf.format(best.p.x)} vidéos<br><span class="m">${day(best.p.date).toLocaleDateString("fr-FR", { dateStyle: "medium" })}</span>`;
+    tip.style.left = Math.min(Math.max(best.cx / k, 80), r.width - 80) + "px";
+    tip.style.top = best.cy / k + "px";
+    tip.hidden = false;
+  });
+  el.addEventListener("pointerleave", hide);
+}
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { const e = Object.entries(history.channels); if (e.length) renderCurve(e); }, 150);
+});
+
 function render() {
   const entries = Object.entries(history.channels);
+  if (entries.length) renderCurve(entries);
   if (!entries.length) {
     root.innerHTML = '<div class="empty"><strong>Aucune donnée pour l’instant</strong><p>Lance le workflow « Mise à jour des stats YouTube » dans l’onglet Actions de GitHub : les chiffres apparaîtront ici ensuite, puis chaque matin à 9h.</p></div>';
     document.getElementById("updated").textContent = "En attente de la première mise à jour";
