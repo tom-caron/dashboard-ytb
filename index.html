@@ -91,7 +91,7 @@
   </header>
   <section class="channel curve" id="curve" hidden>
     <h2>Vues selon le nombre de vidéos publiées</h2>
-    <p class="sub">Une courbe par chaîne, un point par jour de relevé (tout l’historique).</p>
+    <p class="sub">Une courbe par chaîne, un point par jour de relevé sur la période choisie.</p>
     <ul class="legend" id="curve-legend"></ul>
     <div class="plot" id="curve-plot"></div>
     <details>
@@ -156,9 +156,13 @@ function niceDomain(min, max, count, integer) {
 function renderCurve(entries) {
   const box = document.getElementById("curve");
   box.hidden = false;
+  const inRange = (h) => {
+    const since = new Date(day(h[h.length - 1].date) - range * 864e5);
+    return h.filter((r) => day(r.date) >= since);
+  };
   const series = entries.map(([id, ch], i) => ({
     id, title: ch.title, color: `var(--s${(i % 7) + 1})`,
-    pts: ch.history.filter((r) => r.videos != null && r.views != null)
+    pts: inRange(ch.history).filter((r) => r.videos != null && r.views != null)
       .map((r) => ({ x: r.videos, y: r.views, date: r.date }))
       .sort((a, b) => a.x - b.x || a.date.localeCompare(b.date)),
   })).filter((s) => s.pts.length);
