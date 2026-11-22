@@ -22,6 +22,8 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main   # toujours la dernière version, même quand on relance un ancien run
 
       - uses: actions/setup-python@v5
         with:
@@ -37,7 +39,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/history.json data/videos.json
-          git diff --staged --quiet || (git commit -m "Stats YouTube du $(date -u +%F)" && git push)
+          git diff --staged --quiet || (git commit -m "Stats YouTube du $(date -u +%F)" && (git push || (git pull --rebase origin main && git push)))
 
       - name: Préparer le site
         run: mkdir _site && cp -r index.html data _site/
