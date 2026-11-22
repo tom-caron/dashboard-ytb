@@ -38,6 +38,8 @@
   .who img { width: 48px; height: 48px; border-radius: 50%; background: var(--line); }
   .who a { font: 700 1.25rem var(--display); color: inherit; text-decoration: none; }
   .who a:hover { text-decoration: underline; }
+  .who .lastvid { margin: 2px 0 0; color: var(--muted); font-size: 0.88rem; }
+  .who .lastvid a { font: inherit; color: var(--ink); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
   .label { color: var(--muted); font-size: 0.9rem; }
   .value { font: 700 clamp(2rem, 5vw, 2.8rem)/1.1 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -82,6 +84,13 @@
   .vh { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
   .vh-top { display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .vh h3 { margin: 0; font: 500 0.95rem var(--body); color: var(--muted); }
+  .vh-toggle { display: inline-flex; align-items: center; gap: 8px; font: inherit; color: inherit; background: none; border: 0; padding: 4px 0; cursor: pointer; }
+  .vh-toggle:hover { color: var(--ink); }
+  .vh-toggle:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .vh-toggle .chev { display: inline-block; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translate(-2px, -2px); transition: transform 0.15s; }
+  .vh-toggle[aria-expanded="false"] .chev { transform: rotate(-45deg); }
+  .vh.closed .vh-seg, .vh.closed .vh-body { display: none; }
+  .vh.closed .vh-top { margin-bottom: 0; }
   .vh .legend button { max-width: 100%; }
   .vh .legend .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 </style>
@@ -275,8 +284,24 @@ function tickLabel(d, step) {
   return d.toLocaleDateString("fr-FR", step < 24 ? { weekday: "short", day: "numeric" } : { day: "numeric", month: "short" });
 }
 
+// Graphiques repliés (mémorisés dans le navigateur)
+const collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem("vh-collapsed") || "[]"); } catch { return []; } })());
+const saveCollapsed = () => { try { localStorage.setItem("vh-collapsed", JSON.stringify([...collapsed])); } catch {} };
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".vh-toggle");
+  if (!b) return;
+  const box = b.closest(".vh"), id = box.dataset.ch;
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  saveCollapsed();
+  drawVideoChart(box);
+});
+
 function drawVideoChart(box) {
   const chId = box.dataset.ch, ch = videoData.channels[chId];
+  const isClosed = collapsed.has(chId);
+  box.classList.toggle("closed", isClosed);
+  box.querySelector(".vh-toggle").setAttribute("aria-expanded", !isClosed);
   if (!ch || !ch.videos || !ch.videos.length) { box.hidden = true; return; }
   // Fin = dernier relevé connu, début = fin - fenêtre choisie
   let endMs = 0;
@@ -296,6 +321,7 @@ function drawVideoChart(box) {
   }).filter((s) => s.inWin.length);
 
   box.hidden = false;
+  if (isClosed) return;
   const legend = box.querySelector(".legend"), plot = box.querySelector(".plot");
   legend.innerHTML = series.map((s) => `<li><button data-id="${esc(s.v.id)}" aria-pressed="${!hiddenVideos.has(s.v.id)}" title="${esc(s.v.title)}"><span class="sw" style="background:${s.color}"></span><span class="t">${esc(shortTitle(s.v.title, 40))}</span></button></li>`).join("");
   legend.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
@@ -379,6 +405,14 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => { renderCurve(); renderVideoCharts(); }, 150);
 });
 
+function lastVideo(id) {
+  const vids = videoData.channels[id]?.videos;
+  if (!vids || !vids.length) return "";
+  const v = vids.reduce((a, b) => (b.published > a.published ? b : a));
+  const when = new Date(v.published).toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return `<p class="lastvid">Dernière vidéo : ${when} · <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener" title="${esc(v.title)}">${esc(shortTitle(v.title, 50))}</a></p>`;
+}
+
 function render() {
   const entries = Object.entries(history.channels);
   renderCurve();
@@ -395,9 +429,9 @@ function render() {
     const since = new Date(day(lastDate) - range * 864e5);
     const rows = all.filter((r) => day(r.date) >= since);
     return `<section class="channel">
-      <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a></div>
+      <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><div><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a>${lastVideo(id)}</div></div>
       <div class="stats">${stat("Abonnés", rows, "subs")}${stat("Vues totales", rows, "views")}${stat("Vidéos publiées", rows, "videos")}</div>
-      <div class="vh" data-ch="${esc(id)}" hidden><div class="vh-top"><h3>Vues de chaque vidéo</h3>${vhSeg()}</div><ul class="legend"></ul><div class="plot"></div></div>
+      <div class="vh" data-ch="${esc(id)}" hidden><div class="vh-top"><h3><button class="vh-toggle" aria-expanded="true"><span class="chev" aria-hidden="true"></span>Vues de chaque vidéo</button></h3>${vhSeg()}</div><div class="vh-body"><ul class="legend"></ul><div class="plot"></div></div></div>
     </section>`;
   }).join("");
   renderVideoCharts();
@@ -417,7 +451,7 @@ fetch("data/history.json", { cache: "no-store" })
     fetch("data/videos.json", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { channels: {} }))
       .then((v) => {
-        videoData = v; renderCurve();
+        videoData = v; render();
         return fetch("data/video_history.json", { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : { videos: {} }))
           .then((h) => { videoHistory = h; renderVideoCharts(); });
