@@ -162,11 +162,14 @@ function renderCurve() {
   if (!entries.length) return;
   // Une couleur fixe par chaîne, dans l'ordre de l'historique
   const order = Object.keys(history.channels);
+  // Filtre de période : vidéos publiées dans les N derniers jours (par rapport à la date des données)
+  const ref = videoData.date ? day(videoData.date) : new Date();
+  const since = ref - range * 864e5;
   const series = entries.map(([id, ch]) => {
     const idx = order.includes(id) ? order.indexOf(id) : order.length + entries.findIndex(([i]) => i === id);
     return {
       id, title: ch.title, color: `var(--s${(idx % 7) + 1})`,
-      pts: ch.videos.map((v, k) => ({ x: k + 1, y: v.views, v })),
+      pts: ch.videos.map((v, k) => ({ x: k + 1, y: v.views, v })).filter((p) => new Date(p.v.published) >= since),
     };
   });
 
@@ -180,13 +183,15 @@ function renderCurve() {
 
   // Tableau récapitulatif
   document.getElementById("curve-table").innerHTML = "<thead><tr><th>Chaîne</th><th>Vidéos</th><th>Vues</th><th>Vues / vidéo</th></tr></thead><tbody>" +
-    series.map((s) => { const n = s.pts.length, tot = s.pts.reduce((a, p) => a + p.y, 0); return `<tr><td>${esc(s.title)}</td><td>${nf.format(n)}</td><td>${nf.format(tot)}</td><td>${nf.format(Math.round(tot / n))}</td></tr>`; }).join("") + "</tbody>";
+    series.filter((s) => s.pts.length).map((s) => { const n = s.pts.length, tot = s.pts.reduce((a, p) => a + p.y, 0); return `<tr><td>${esc(s.title)}</td><td>${nf.format(n)}</td><td>${nf.format(tot)}</td><td>${nf.format(Math.round(tot / n))}</td></tr>`; }).join("") + "</tbody>";
 
   const plot = document.getElementById("curve-plot");
-  const shown = series.filter((s) => !hiddenSeries.has(s.id));
-  if (!shown.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une chaîne dans la légende.</p>'; return; }
+  const visible = series.filter((s) => !hiddenSeries.has(s.id));
+  if (!visible.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une chaîne dans la légende.</p>'; return; }
+  const shown = visible.filter((s) => s.pts.length);
+  if (!shown.length) { plot.innerHTML = `<p class="hint">Aucune vidéo publiée sur les ${range} derniers jours.</p>`; return; }
 
-  const X = niceDomain(1, Math.max(...shown.map((s) => s.pts.length)), 6, true);
+  const X = niceDomain(Math.min(...shown.map((s) => s.pts[0].x)), Math.max(...shown.map((s) => s.pts[s.pts.length - 1].x)), 6, true);
   const Y = niceDomain(0, Math.max(...shown.flatMap((s) => s.pts.map((p) => p.y))), 5, true);
   const W = Math.max(300, plot.clientWidth), H = Math.round(Math.min(380, Math.max(240, W * 0.5)));
   const m = { t: 10, r: 12, b: 42, l: 72 };
