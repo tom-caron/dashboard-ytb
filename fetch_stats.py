@@ -5,12 +5,14 @@ import os
 import pathlib
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 ROOT = pathlib.Path(__file__).parent
 HISTORY = ROOT / "data" / "history.json"
 VIDEOS = ROOT / "data" / "videos.json"
+VIDEO_HISTORY = ROOT / "data" / "video_history.json"
+KEEP_DAYS = 30  # durée conservée dans l'historique des vues par vidéo
 BASE = "https://www.googleapis.com/youtube/v3"
 API = f"{BASE}/channels"
 
@@ -95,6 +97,24 @@ def main() -> None:
 
     HISTORY.write_text(json.dumps(history, ensure_ascii=False, indent=1), encoding="utf-8")
     VIDEOS.write_text(json.dumps(videos, ensure_ascii=False, indent=1), encoding="utf-8")
+    save_video_history(videos)
+
+
+def save_video_history(videos: dict) -> None:
+    """Ajoute un relevé horodaté [heure UTC, vues] pour chaque vidéo (une ligne par vidéo)."""
+    now = datetime.now(timezone.utc)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (now - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    hist = json.loads(VIDEO_HISTORY.read_text(encoding="utf-8"))["videos"] if VIDEO_HISTORY.exists() else {}
+    for ch in videos["channels"].values():
+        for v in ch["videos"]:
+            hist.setdefault(v["id"], []).append([stamp, v["views"]])
+    for vid, pts in hist.items():
+        old = [p for p in pts if p[0] < cutoff]
+        # garde le dernier relevé avant la limite pour que la courbe démarre au bord du graphique
+        hist[vid] = old[-1:] + [p for p in pts if p[0] >= cutoff]
+    lines = [f" {json.dumps(vid)}: {json.dumps(pts, separators=(',', ':'))}" for vid, pts in hist.items()]
+    VIDEO_HISTORY.write_text('{"videos": {\n' + ",\n".join(lines) + "\n}}\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

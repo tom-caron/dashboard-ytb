@@ -74,6 +74,15 @@
   .curve th, .curve td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   .curve th:first-child, .curve td:first-child { text-align: left; }
   .curve th { color: var(--muted); font-weight: 500; }
+
+  /* Évolution des vues de chaque vidéo (par chaîne) */
+  .vh-head { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: end; margin: 34px 0 14px; }
+  .vh-head h2 { margin: 0; font: 700 1.4rem var(--display); letter-spacing: -0.01em; }
+  .vh-head p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
+  .vh { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .vh h3 { margin: 0 0 8px; font: 500 0.95rem var(--body); color: var(--muted); }
+  .vh .legend button { max-width: 100%; }
+  .vh .legend .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 </style>
 </head>
 <body>
@@ -99,6 +108,17 @@
       <table id="curve-table"></table>
     </details>
   </section>
+  <div class="vh-head" id="vh-head" hidden>
+    <div>
+      <h2>Évolution des vues de chaque vidéo</h2>
+      <p>Une courbe par vidéo, relevée toutes les heures. Survole un point pour voir le détail.</p>
+    </div>
+    <div class="seg" id="vh-range" role="group" aria-label="Fenêtre de temps des courbes">
+      <button data-hours="48" aria-pressed="true">48 h</button>
+      <button data-hours="168" aria-pressed="false">7 jours</button>
+      <button data-hours="336" aria-pressed="false">14 jours</button>
+    </div>
+  </div>
   <main id="channels" aria-live="polite"></main>
 </div>
 
@@ -233,10 +253,125 @@ function renderCurve() {
   el.addEventListener("pointerleave", hide);
 }
 
+// ---------- Évolution des vues de chaque vidéo, par chaîne ----------
+let videoHistory = { videos: {} };
+let vhHours = 48;
+const hiddenVideos = new Set();
+const shortTitle = (t, n = 48) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+
+function timeTicks(start, end, hours) {
+  const step = hours <= 48 ? 6 : hours <= 168 ? 24 : 48; // en heures
+  const d = new Date(start);
+  d.setMinutes(0, 0, 0);
+  if (step >= 24) d.setHours(0); else d.setHours(Math.floor(d.getHours() / step) * step);
+  const ticks = [];
+  while (d <= end) { if (d >= start) ticks.push(new Date(d)); d.setHours(d.getHours() + step); }
+  return { ticks, step };
+}
+
+function tickLabel(d, step) {
+  if (step < 24 && (d.getHours() || d.getMinutes())) return d.getHours() + "h";
+  return d.toLocaleDateString("fr-FR", step < 24 ? { weekday: "short", day: "numeric" } : { day: "numeric", month: "short" });
+}
+
+function drawVideoChart(box) {
+  const chId = box.dataset.ch, ch = videoData.channels[chId];
+  if (!ch || !ch.videos || !ch.videos.length) { box.hidden = true; return; }
+  // Fin = dernier relevé connu, début = fin - fenêtre choisie
+  let endMs = 0;
+  for (const pts of Object.values(videoHistory.videos)) if (pts.length) endMs = Math.max(endMs, Date.parse(pts[pts.length - 1][0]));
+  if (!endMs) { box.hidden = true; return; }
+  const end = new Date(endMs), start = new Date(endMs - vhHours * 36e5);
+
+  const series = ch.videos.map((v, i) => {
+    let pts = (videoHistory.videos[v.id] || []).map(([t, y]) => ({ t: new Date(t), y }));
+    const pub = new Date(v.published);
+    // Une vidéo a 0 vue au moment de sa publication
+    if (!pts.length || pub < pts[0].t) pts.unshift({ t: pub, y: 0, pub: true });
+    // On garde le dernier relevé avant la fenêtre pour que la courbe parte du bord
+    const before = pts.filter((p) => p.t < start).slice(-1);
+    pts = before.concat(pts.filter((p) => p.t >= start));
+    return { v, color: `var(--s${(i % 7) + 1})`, pts, inWin: pts.filter((p) => p.t >= start) };
+  }).filter((s) => s.inWin.length);
+
+  box.hidden = false;
+  const legend = box.querySelector(".legend"), plot = box.querySelector(".plot");
+  legend.innerHTML = series.map((s) => `<li><button data-id="${esc(s.v.id)}" aria-pressed="${!hiddenVideos.has(s.v.id)}" title="${esc(s.v.title)}"><span class="sw" style="background:${s.color}"></span><span class="t">${esc(shortTitle(s.v.title, 40))}</span></button></li>`).join("");
+  legend.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    hiddenVideos.has(b.dataset.id) ? hiddenVideos.delete(b.dataset.id) : hiddenVideos.add(b.dataset.id);
+    drawVideoChart(box);
+  }));
+
+  if (!series.length) { plot.innerHTML = '<p class="hint">Aucune vidéo sur cette période.</p>'; return; }
+  const shown = series.filter((s) => !hiddenVideos.has(s.v.id));
+  if (!shown.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une vidéo dans la légende.</p>'; return; }
+
+  // Valeur au bord gauche (interpolée) pour caler l'échelle des vues sur la fenêtre
+  const atStart = (s) => {
+    const [a, b] = s.pts;
+    if (!(a.t < start) || !b) return [];
+    return [a.y + (b.y - a.y) * ((start - a.t) / (b.t - a.t))];
+  };
+  const ys = shown.flatMap((s) => s.inWin.map((p) => p.y).concat(atStart(s)));
+  const Y = niceDomain(Math.min(...ys), Math.max(...ys), 4, true);
+  const W = Math.max(300, plot.clientWidth), H = Math.round(Math.min(320, Math.max(220, W * 0.42)));
+  const m = { t: 10, r: 14, b: 30, l: 64 };
+  const sx = (d) => m.l + ((d - start) / (end - start)) * (W - m.l - m.r);
+  const sy = (v) => H - m.b - ((v - Y.lo) / (Y.hi - Y.lo)) * (H - m.t - m.b);
+  let { ticks, step } = timeTicks(start, end, vhHours);
+  if (W < 520) ticks = ticks.filter((_, i) => i % 2 === 0);
+  const clip = "vclip-" + chId;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Vues de chaque vidéo de ${esc(ch.title)} sur la période">`;
+  svg += `<defs><clipPath id="${esc(clip)}"><rect x="${m.l}" y="0" width="${W - m.l - m.r}" height="${H - m.b + 1}"/></clipPath></defs>`;
+  svg += Y.ticks.map((t) => `<line x1="${m.l}" x2="${W - m.r}" y1="${sy(t)}" y2="${sy(t)}" stroke="var(--grid)"/><text class="tick" x="${m.l - 8}" y="${sy(t)}" text-anchor="end" dominant-baseline="middle">${compact.format(t)}</text>`).join("");
+  svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--line)"/>`;
+  svg += ticks.map((t) => `<line x1="${sx(t)}" x2="${sx(t)}" y1="${H - m.b}" y2="${H - m.b + 4}" stroke="var(--line)"/><text class="tick" x="${sx(t)}" y="${H - m.b + 18}" text-anchor="middle">${esc(tickLabel(t, step))}</text>`).join("");
+  svg += `<g clip-path="url(#${esc(clip)})">`;
+  for (const s of shown) {
+    const d = s.pts.map((p, i) => (i ? "L" : "M") + sx(p.t).toFixed(1) + " " + sy(p.y).toFixed(1)).join(" ");
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = s.pts[s.pts.length - 1];
+    svg += `<circle cx="${sx(last.t)}" cy="${sy(last.y)}" r="3.5" fill="${s.color}" stroke="var(--panel)" stroke-width="2"/>`;
+  }
+  svg += `</g><circle class="hl" r="5" fill="none" stroke="var(--ink)" stroke-width="2" visibility="hidden"/></svg>`;
+  plot.innerHTML = svg + '<div class="tip" hidden></div>';
+
+  const el = plot.querySelector("svg"), tip = plot.querySelector(".tip"), hl = plot.querySelector(".hl");
+  const targets = shown.flatMap((s) => s.inWin.map((p) => ({ s, p, cx: sx(p.t), cy: sy(p.y) })));
+  const hide = () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); };
+  el.addEventListener("pointermove", (e) => {
+    const r = el.getBoundingClientRect(), k = W / r.width;
+    const mx = (e.clientX - r.left) * k, my = (e.clientY - r.top) * k;
+    let best = null, bd = 28 * k;
+    for (const t of targets) { const d = Math.hypot(t.cx - mx, t.cy - my); if (d < bd) { bd = d; best = t; } }
+    if (!best) return hide();
+    hl.setAttribute("cx", best.cx); hl.setAttribute("cy", best.cy); hl.setAttribute("visibility", "visible");
+    const when = best.p.t.toLocaleString("fr-FR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    tip.innerHTML = `<b>${esc(shortTitle(best.s.v.title))}</b><br>${nf.format(best.p.y)} vues<br><span class="m">${best.p.pub ? "publiée le " : ""}${when}</span>`;
+    tip.style.left = Math.min(Math.max(best.cx / k, 130), r.width - 130) + "px";
+    tip.style.top = best.cy / k + "px";
+    tip.hidden = false;
+  });
+  el.addEventListener("pointerleave", hide);
+}
+
+function renderVideoCharts() {
+  const boxes = document.querySelectorAll(".vh[data-ch]");
+  boxes.forEach(drawVideoChart);
+  document.getElementById("vh-head").hidden = ![...boxes].some((b) => !b.hidden);
+}
+
+document.querySelectorAll("#vh-range button").forEach((b) => b.addEventListener("click", () => {
+  vhHours = +b.dataset.hours;
+  document.querySelectorAll("#vh-range button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  renderVideoCharts();
+}));
+
 let resizeTimer;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(renderCurve, 150);
+  resizeTimer = setTimeout(() => { renderCurve(); renderVideoCharts(); }, 150);
 });
 
 function render() {
@@ -257,14 +392,16 @@ function render() {
     return `<section class="channel">
       <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a></div>
       <div class="stats">${stat("Abonnés", rows, "subs")}${stat("Vues totales", rows, "views")}${stat("Vidéos publiées", rows, "videos")}</div>
+      <div class="vh" data-ch="${esc(id)}" hidden><h3>Vues de chaque vidéo</h3><ul class="legend"></ul><div class="plot"></div></div>
     </section>`;
   }).join("");
+  renderVideoCharts();
   document.getElementById("updated").textContent = "Dernière mise à jour : " + day(latest).toLocaleDateString("fr-FR", { dateStyle: "full" });
 }
 
-document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+document.querySelectorAll("header .seg button").forEach((b) => b.addEventListener("click", () => {
   range = +b.dataset.range;
-  document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  document.querySelectorAll("header .seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
   render();
 }));
 
@@ -274,7 +411,12 @@ fetch("data/history.json", { cache: "no-store" })
     history = j; render();
     fetch("data/videos.json", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { channels: {} }))
-      .then((v) => { videoData = v; renderCurve(); })
+      .then((v) => {
+        videoData = v; renderCurve();
+        return fetch("data/video_history.json", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : { videos: {} }))
+          .then((h) => { videoHistory = h; renderVideoCharts(); });
+      })
       .catch(() => {});
   })
   .catch(() => {

@@ -1,6 +1,6 @@
 # Tableau de bord de mes chaînes YouTube
 
-Chaque matin, GitHub Actions récupère les stats publiques (abonnés, vues, nombre de vidéos),
+Toutes les heures, GitHub Actions récupère les stats publiques (abonnés, vues, nombre de vidéos),
 les ajoute à `data/history.json` et republie la page `index.html`.
 
 ## Mise en place (une seule fois)
@@ -16,10 +16,10 @@ L'adresse du tableau de bord s'affiche à la fin du workflow (et dans Settings �
 
 ## Bon à savoir
 
-- L'heure du cron est en UTC : `0 8` = 9h à Paris l'hiver, 10h l'été (passe à `0 7` en été).
-  GitHub peut décaler l'exécution de quelques minutes.
+- Le cron (`7 * * * *`) lance la mise à jour toutes les heures, à hh:07 UTC. GitHub peut la décaler de quelques minutes.
 - L'historique commence le jour du premier lancement : les courbes se remplissent jour après jour.
 - Le graphique « Vues de chaque vidéo » utilise `data/videos.json`, réécrit à chaque lancement avec toutes les vidéos publiques de chaque chaîne (titre, date, vues). Il est donc complet dès le premier lancement.
+- « Évolution des vues de chaque vidéo » : à chaque lancement (toutes les heures), les vues de chaque vidéo sont ajoutées avec l'heure dans `data/video_history.json` (30 derniers jours conservés). Chaque courbe part de 0 vue à la publication de la vidéo.
 - Les « Vues totales » sont la somme des vues de chaque vidéo : le compteur de la chaîne renvoyé par YouTube a souvent plusieurs jours de retard.
 - L'API publique ne donne pas le temps de visionnage, les impressions ni le CTR : il faudrait l'API YouTube Analytics (OAuth) pour ça.
 - Le dépôt étant public, l'historique l'est aussi (ce sont des chiffres déjà publics sur YouTube).

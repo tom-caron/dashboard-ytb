@@ -2,7 +2,7 @@ name: Mise à jour des stats YouTube
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # 08:00 UTC = 9h à Paris en hiver (10h en été : passe à "0 7" au changement d'heure)
+    - cron: "7 * * * *"   # toutes les heures (à hh:07) pour suivre l'évolution des vues de chaque vidéo
   workflow_dispatch:       # lancement manuel depuis l'onglet Actions
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/history.json data/videos.json
+          git add data/history.json data/videos.json data/video_history.json
           git diff --staged --quiet || (git commit -m "Stats YouTube du $(date -u +%F)" && (git push || (git pull --rebase origin main && git push)))
 
       - name: Préparer le site
