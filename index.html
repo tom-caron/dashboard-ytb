@@ -80,7 +80,8 @@
   .vh-head h2 { margin: 0; font: 700 1.4rem var(--display); letter-spacing: -0.01em; }
   .vh-head p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
   .vh { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
-  .vh h3 { margin: 0 0 8px; font: 500 0.95rem var(--body); color: var(--muted); }
+  .vh-top { display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .vh h3 { margin: 0; font: 500 0.95rem var(--body); color: var(--muted); }
   .vh .legend button { max-width: 100%; }
   .vh .legend .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 </style>
@@ -113,7 +114,7 @@
       <h2>Évolution des vues de chaque vidéo</h2>
       <p>Une courbe par vidéo, relevée toutes les heures. Survole un point pour voir le détail.</p>
     </div>
-    <div class="seg" id="vh-range" role="group" aria-label="Fenêtre de temps des courbes">
+    <div class="seg vh-seg" role="group" aria-label="Fenêtre de temps des courbes">
       <button data-hours="48" aria-pressed="true">48 h</button>
       <button data-hours="168" aria-pressed="false">7 jours</button>
       <button data-hours="336" aria-pressed="false">14 jours</button>
@@ -362,11 +363,15 @@ function renderVideoCharts() {
   document.getElementById("vh-head").hidden = ![...boxes].some((b) => !b.hidden);
 }
 
-document.querySelectorAll("#vh-range button").forEach((b) => b.addEventListener("click", () => {
+// Les sélecteurs 48 h / 7 jours / 14 jours (en tête de section et sur chaque graphique) sont synchronisés
+const vhSeg = () => `<div class="seg vh-seg" role="group" aria-label="Fenêtre de temps du graphique">${[[48, "48 h"], [168, "7 jours"], [336, "14 jours"]].map(([h, l]) => `<button data-hours="${h}" aria-pressed="${h === vhHours}">${l}</button>`).join("")}</div>`;
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".vh-seg button");
+  if (!b) return;
   vhHours = +b.dataset.hours;
-  document.querySelectorAll("#vh-range button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  document.querySelectorAll(".vh-seg button").forEach((x) => x.setAttribute("aria-pressed", +x.dataset.hours === vhHours));
   renderVideoCharts();
-}));
+});
 
 let resizeTimer;
 window.addEventListener("resize", () => {
@@ -392,7 +397,7 @@ function render() {
     return `<section class="channel">
       <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a></div>
       <div class="stats">${stat("Abonnés", rows, "subs")}${stat("Vues totales", rows, "views")}${stat("Vidéos publiées", rows, "videos")}</div>
-      <div class="vh" data-ch="${esc(id)}" hidden><h3>Vues de chaque vidéo</h3><ul class="legend"></ul><div class="plot"></div></div>
+      <div class="vh" data-ch="${esc(id)}" hidden><div class="vh-top"><h3>Vues de chaque vidéo</h3>${vhSeg()}</div><ul class="legend"></ul><div class="plot"></div></div>
     </section>`;
   }).join("");
   renderVideoCharts();
