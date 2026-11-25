@@ -91,8 +91,26 @@
   .vh-toggle[aria-expanded="false"] .chev { transform: rotate(-45deg); }
   .vh.closed .vh-seg, .vh.closed .vh-body { display: none; }
   .vh.closed .vh-top { margin-bottom: 0; }
-  .vh .legend button { max-width: 100%; }
-  .vh .legend .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+  /* Tableau de sélection des vidéos */
+  .vt { max-height: 330px; overflow-y: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; }
+  .vt table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+  .vt th, .vt td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  .vt tbody tr:last-child td { border-bottom: 0; }
+  .vt th { position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--muted); font-weight: 500; }
+  .vt .c-sel { width: 38px; }
+  .vt .c-n { width: 44px; }
+  .vt .c-v { width: 84px; text-align: right; }
+  .vt .c-d { width: 116px; }
+  .vt td.t { overflow: hidden; text-overflow: ellipsis; }
+  .vt input { width: 16px; height: 16px; margin: 0; cursor: pointer; vertical-align: middle; }
+  .vt tbody tr { cursor: pointer; }
+  .vt tbody tr:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .vt tbody tr.off { color: var(--muted); }
+  .vt tbody tr.na { color: var(--muted); cursor: default; opacity: 0.6; }
+  .vt tbody tr.na:hover { background: none; }
+  .vt .sw { display: inline-block; width: 4px; height: 16px; border-radius: 2px; vertical-align: middle; margin-right: 8px; }
+  .vt tr.off .sw { opacity: 0.3; }
+  @media (max-width: 560px) { .vt .c-d, .vt td.d { display: none; } .vt .c-v { width: 70px; } }
 </style>
 </head>
 <body>
@@ -322,16 +340,12 @@ function drawVideoChart(box) {
 
   box.hidden = false;
   if (isClosed) return;
-  const legend = box.querySelector(".legend"), plot = box.querySelector(".plot");
-  legend.innerHTML = series.map((s) => `<li><button data-id="${esc(s.v.id)}" aria-pressed="${!hiddenVideos.has(s.v.id)}" title="${esc(s.v.title)}"><span class="sw" style="background:${s.color}"></span><span class="t">${esc(shortTitle(s.v.title, 40))}</span></button></li>`).join("");
-  legend.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-    hiddenVideos.has(b.dataset.id) ? hiddenVideos.delete(b.dataset.id) : hiddenVideos.add(b.dataset.id);
-    drawVideoChart(box);
-  }));
+  const plot = box.querySelector(".plot");
+  renderVideoTable(box, ch, series);
 
   if (!series.length) { plot.innerHTML = '<p class="hint">Aucune vidéo sur cette période.</p>'; return; }
   const shown = series.filter((s) => !hiddenVideos.has(s.v.id));
-  if (!shown.length) { plot.innerHTML = '<p class="hint">Sélectionne au moins une vidéo dans la légende.</p>'; return; }
+  if (!shown.length) { plot.innerHTML = '<p class="hint">Coche au moins une vidéo dans le tableau.</p>'; return; }
 
   // Valeur au bord gauche (interpolée) pour caler l'échelle des vues sur la fenêtre
   const atStart = (s) => {
@@ -383,6 +397,44 @@ function drawVideoChart(box) {
   el.addEventListener("pointerleave", hide);
 }
 
+// Tableau de sélection : n°, titre, vues actuelles, date de publication. Chaque ligne coche / décoche sa courbe.
+function renderVideoTable(box, ch, series) {
+  const inWin = new Set(series.map((s) => s.v.id));
+  const avail = ch.videos.filter((v) => inWin.has(v.id));
+  const allOn = avail.length > 0 && avail.every((v) => !hiddenVideos.has(v.id));
+  const someOn = avail.some((v) => !hiddenVideos.has(v.id));
+  const rows = ch.videos.map((v, i) => {
+    const na = !inWin.has(v.id), on = !na && !hiddenVideos.has(v.id);
+    const date = new Date(v.published).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+    const color = `var(--s${(i % 7) + 1})`;
+    return `<tr data-id="${esc(v.id)}" class="${na ? "na" : on ? "" : "off"}"${na ? ' title="Pas de relevé sur cette période"' : ""}>
+      <td><input type="checkbox" aria-label="Afficher la vidéo n°${i + 1}" ${on ? "checked" : ""} ${na ? "disabled" : ""} style="accent-color:${color}"></td>
+      <td><span class="sw" style="background:${color}"></span>${i + 1}</td>
+      <td class="t" title="${esc(v.title)}">${esc(v.title)}</td>
+      <td class="c-v">${nf.format(v.views)}</td>
+      <td class="d">${date}</td></tr>`;
+  }).join("");
+  const wrap = box.querySelector(".vt");
+  const scroll = wrap.scrollTop;
+  wrap.innerHTML = `<table><thead><tr>
+    <th class="c-sel"><input type="checkbox" class="all" aria-label="Tout afficher ou tout masquer" ${allOn ? "checked" : ""}></th>
+    <th class="c-n">N°</th><th>Titre</th><th class="c-v">Vues</th><th class="c-d">Publiée le</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.scrollTop = scroll;
+  const all = wrap.querySelector("input.all");
+  all.indeterminate = someOn && !allOn;
+  all.disabled = !avail.length;
+  all.addEventListener("change", () => {
+    avail.forEach((v) => (all.checked ? hiddenVideos.delete(v.id) : hiddenVideos.add(v.id)));
+    drawVideoChart(box);
+  });
+  wrap.querySelectorAll("tbody tr:not(.na)").forEach((tr) => tr.addEventListener("click", (e) => {
+    const id = tr.dataset.id;
+    hiddenVideos.has(id) ? hiddenVideos.delete(id) : hiddenVideos.add(id);
+    if (e.target.matches("input")) e.target.checked = !hiddenVideos.has(id);
+    drawVideoChart(box);
+  }));
+}
+
 function renderVideoCharts() {
   const boxes = document.querySelectorAll(".vh[data-ch]");
   boxes.forEach(drawVideoChart);
@@ -431,7 +483,7 @@ function render() {
     return `<section class="channel">
       <div class="who"><img src="${esc(ch.thumb)}" alt="" width="48" height="48"><div><a href="https://www.youtube.com/channel/${esc(id)}" target="_blank" rel="noopener">${esc(ch.title)}</a>${lastVideo(id)}</div></div>
       <div class="stats">${stat("Abonnés", rows, "subs")}${stat("Vues totales", rows, "views")}${stat("Vidéos publiées", rows, "videos")}</div>
-      <div class="vh" data-ch="${esc(id)}" hidden><div class="vh-top"><h3><button class="vh-toggle" aria-expanded="true"><span class="chev" aria-hidden="true"></span>Vues de chaque vidéo</button></h3>${vhSeg()}</div><div class="vh-body"><ul class="legend"></ul><div class="plot"></div></div></div>
+      <div class="vh" data-ch="${esc(id)}" hidden><div class="vh-top"><h3><button class="vh-toggle" aria-expanded="true"><span class="chev" aria-hidden="true"></span>Vues de chaque vidéo</button></h3>${vhSeg()}</div><div class="vh-body"><div class="vt"></div><div class="plot"></div></div></div>
     </section>`;
   }).join("");
   renderVideoCharts();
