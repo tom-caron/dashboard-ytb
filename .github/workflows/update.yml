@@ -48,5 +48,19 @@ jobs:
         with:
           path: _site
 
-      - id: deploy
+      # GitHub met parfois quelques secondes à rendre l'artefact visible :
+      # 1er essai toléré en échec, puis on attend et on retente.
+      - id: deploy_try
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Attendre avant de retenter
+        if: steps.deploy_try.outcome == 'failure'
+        run: sleep 30
+
+      - id: deploy_retry
+        if: steps.deploy_try.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+
+      - id: deploy
+        run: echo "page_url=${{ steps.deploy_try.outputs.page_url || steps.deploy_retry.outputs.page_url }}" >> "$GITHUB_OUTPUT"
